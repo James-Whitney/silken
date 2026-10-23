@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Growth Chart</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1d2433;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --female: rgb(214, 51, 108);
+      --male: rgb(28, 126, 214);
+      --accent: #111827;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+    }
+    main { max-width: 1200px; margin: 0 auto; padding: 24px 20px 48px; }
+    header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+    .sub a { color: inherit; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat .value { font-size: 1.5rem; font-weight: 650; }
+    .stat .label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .controls { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; margin-bottom: 16px; }
+    .control { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
+    .control > span { color: var(--muted); font-weight: 500; }
+    .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .segmented button {
+      border: 0; background: var(--card); padding: 7px 12px; font: inherit; cursor: pointer; color: var(--text);
+    }
+    .segmented button + button { border-left: 1px solid var(--border); }
+    .segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+    select, input[type="search"] {
+      font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);
+    }
+    input[type="search"] { min-width: 260px; }
+    label.check { flex-direction: row; align-items: center; gap: 6px; cursor: pointer; }
+    button.plain {
+      font: inherit; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); cursor: pointer;
+    }
+    button.plain:hover, .segmented button:not([aria-pressed="true"]):hover { background: #f1f2f4; }
+    .chart-card { position: relative; }
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+    .legend i.hollow { background: #fff; border: 2px solid var(--muted); }
+    .legend i.dash { width: 18px; height: 0; border-radius: 0; border-top: 3px dashed var(--muted); vertical-align: 3px; }
+    .chart-wrap { position: relative; height: 540px; }
+    .overlay {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+      color: var(--muted); background: rgba(255, 255, 255, 0.85); padding: 24px;
+    }
+    .overlay[hidden] { display: none; }
+    .hint { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
+    #dog-panel { margin-top: 16px; }
+    #dog-panel h2 { margin: 0 0 4px; font-size: 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 12px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: #fff; }
+    .pill.Female { background: var(--female); }
+    .pill.Male { background: var(--male); }
+    @media (max-width: 640px) {
+      .chart-wrap { height: 420px; }
+      input[type="search"] { min-width: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Growth Chart</h1>
+      <div class="sub">
+        Live from the <a id="sheet-link" target="_blank" rel="noopener">community spreadsheet</a>
+        · <span id="loaded-at">loading…</span>
+      </div>
+    </div>
+    <button class="plain" id="refresh">Refresh data</button>
+  </header>
+
+  <section class="stats">
+    <div class="card stat"><div class="value" id="stat-dogs">–</div><div class="label">Dogs</div></div>
+    <div class="card stat"><div class="value" id="stat-measurements">–</div><div class="label">Measurements</div></div>
+    <div class="card stat"><div class="value" id="stat-female">–</div><div class="label">Female dogs</div></div>
+    <div class="card stat"><div class="value" id="stat-male">–</div><div class="label">Male dogs</div></div>
+  </section>
+
+  <section class="card controls">
+    <div class="control">
+      <span>Measure</span>
+      <div class="segmented" data-state="metric">
+        <button data-value="weight">Weight</button>
+        <button data-value="height">Height</button>
+      </div>
+    </div>
+    <div class="control">
+      <span>Sex</span>
+      <div class="segmented" data-state="sex">
+        <button data-value="all">All</button>
+        <button data-value="Female">Female</button>
+        <button data-value="Male">Male</button>
+      </div>
+    </div>
+    <label class="control">
+      <span>Age range</span>
+      <select id="max-weeks">
+        <option value="26">Up to 6 months</option>
+        <option value="52">Up to 1 year</option>
+        <option value="78">Up to 18 months</option>
+        <option value="all">All ages</option>
+      </select>
+    </label>
+    <label class="control">
+      <span>Highlight a dog</span>
+      <input type="search" id="dog-search" list="dog-list" placeholder="Type a name…" autocomplete="off">
+      <datalist id="dog-list"></datalist>
+    </label>
+    <label class="control check"><input type="checkbox" id="show-lines"> Connect each dog's points</label>
+    <label class="control check"><input type="checkbox" id="show-median"> Median curve</label>
+  </section>
+
+  <section class="card chart-card">
+    <div class="legend">
+      <span><i style="background: var(--female)"></i>Female</span>
+      <span><i style="background: var(--male)"></i>Male</span>
+      <span><i class="hollow"></i>Age estimated</span>
+      <span><i class="dash"></i>Median by age</span>
+      <span id="hidden-note"></span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart" aria-label="Growth chart" role="img"></canvas>
+      <div class="overlay" id="overlay">Loading data…</div>
+    </div>
+    <div class="hint">Hover a point for details. Click a point to highlight that dog; click empty space to clear.</div>
+  </section>
+
+  <section class="card" id="dog-panel" hidden></section>
+</main>
+
+<script>
+  const SHEET_ID = "1QPdgzc6TeibBfTXsvktDI09tmDUBOfDusFM2GIkv3bc";
+  const SHEET_GID = "0";
+  const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}`;
+  // Columns are read by position because the sheet leaves some header cells blank.
+  const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?` + new URLSearchParams({
+    tqx: "out:csv",
+    gid: SHEET_GID,
+    headers: "1",
+    tq: "SELECT A, B, C, D, E, F, G, H",
+  });
+
+  const METRICS = {
+    weight: { label: "Weight (lbs)", unit: "lbs" },
+    height: { label: "Height at withers (in)", unit: "in" },
+  };
+  const SEX_RGB = { Female: "214, 51, 108", Male: "28, 126, 214" };
+  const FALLBACK_RGB = "107, 114, 128";
+
+  const state = {
+    metric: "weight",
+    sex: "all",
+    maxWeeks: 52,
+    selected: null,
+    lines: true,
+    median: true,
+  };
+
+  let dogs = new Map();
+  let chart = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  function toNumber(value) {
+    const text = String(value ?? "").trim();
+    if (text === "") return null;
+    const n = Number(text);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseRows(csvText) {
+    const { data } = Papa.parse(csvText.trim(), { skipEmptyLines: true });
+    return data
+      .slice(1)
+      .map(([name, sex, age, status, weight, height, weeks, notes]) => ({
+        name: String(name ?? "").replace(/\s+/g, " ").trim(),
+        sex: String(sex ?? "").trim() || "Unknown",
+        ageLabel: String(age ?? "").trim(),
+        status: String(status ?? "").trim(),
+        weight: toNumber(weight),
+        height: toNumber(height),
+        weeks: toNumber(weeks),
+        notes: String(notes ?? "").trim(),
+      }))
+      .filter((r) => r.name && r.weeks != null)
+      .map((r) => ({ ...r, ageEstimated: /\best\b/i.test(r.notes) }));
+  }
+
+  function groupByDog(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      if (!map.has(row.name)) map.set(row.name, { name: row.name, sex: row.sex, records: [] });
+      map.get(row.name).records.push(row);
+    }
+    for (const dog of map.values()) dog.records.sort((a, b) => a.weeks - b.weeks);
+    return new Map([...map.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  }
+
+  function rgba(sex, alpha) {
+    return `rgba(${SEX_RGB[sex] ?? FALLBACK_RGB}, ${alpha})`;
+  }
+
+  function visibleDogs() {
+    return [...dogs.values()].filter((d) => state.sex === "all" || d.sex === state.sex);
+  }
+
+  function inRange(record) {
+    return record[state.metric] != null && record.weeks <= state.maxWeeks;
+  }
+
+  // Ages are recorded at uneven intervals, so group them into bins that widen as dogs get older.
+  function ageBin(weeks) {
+    if (weeks <= 30) return Math.round(weeks / 2) * 2;
+    if (weeks <= 52) return Math.round(weeks / 4) * 4;
+    return Math.round(weeks / 13) * 13;
+  }
+
+  function median(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function medianSeries(sex) {
+    const bins = new Map();
+    for (const dog of dogs.values()) {
+      if (dog.sex !== sex) continue;
+      for (const r of dog.records) {
+        if (!inRange(r)) continue;
+        const bin = ageBin(r.weeks);
+        if (!bins.has(bin)) bins.set(bin, { values: [], dogs: new Set() });
+        bins.get(bin).values.push(r[state.metric]);
+        bins.get(bin).dogs.add(dog.name);
+      }
+    }
+    return [...bins.entries()]
+      .filter(([, b]) => b.values.length >= 3 && b.dogs.size >= 2)
+      .sort(([a], [b]) => a - b)
+      .map(([bin, b]) => ({ x: bin, y: median(b.values), n: b.values.length, dogCount: b.dogs.size }));
+  }
+
+  function buildDatasets() {
+    const datasets = [];
+    for (const dog of visibleDogs()) {
+      const points = dog.records.filter(inRange).map((r) => ({ x: r.weeks, y: r[state.metric], record: r }));
+      if (!points.length) continue;
+      const isSelected = state.selected === dog.name;
+      const dimmed = state.selected != null && !isSelected;
+      const pointAlpha = isSelected ? 1 : dimmed ? 0.12 : 0.55;
+      const lineAlpha = isSelected ? 1 : dimmed ? 0.06 : 0.25;
+      datasets.push({
+        kind: "dog",
+        label: dog.name,
+        data: points,
+        showLine: state.lines || isSelected,
+        borderColor: rgba(dog.sex, lineAlpha),
+        borderWidth: isSelected ? 3 : 1,
+        pointBorderColor: rgba(dog.sex, pointAlpha),
+        pointBackgroundColor: points.map((p) => (p.record.ageEstimated ? "#fff" : rgba(dog.sex, pointAlpha))),
+        pointBorderWidth: isSelected ? 2 : 1.5,
+        pointRadius: isSelected ? 5 : 3,
+        pointHoverRadius: 7,
+        order: isSelected ? 0 : 3,
+      });
+    }
+
+    if (state.median) {
+      const sexes = state.sex === "all" ? Object.keys(SEX_RGB) : [state.sex];
+      for (const sex of sexes) {
+        const series = medianSeries(sex);
+        if (series.length < 2) continue;
+        datasets.push({
+          kind: "median",
+          label: `${sex} median`,
+          data: series,
+          showLine: true,
+          borderColor: rgba(sex, 0.95),
+          borderWidth: 3,
+          borderDash: [8, 5],
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointHitRadius: 6,
+          pointBackgroundColor: rgba(sex, 1),
+          cubicInterpolationMode: "monotone",
+          order: 1,
+        });
+      }
+    }
+    return datasets;
+  }
+
+  function hiddenCount() {
+    let count = 0;
+    for (const dog of visibleDogs()) {
+      for (const r of dog.records) {
+        if (r[state.metric] != null && r.weeks > state.maxWeeks) count++;
+      }
+    }
+    return count;
+  }
+
+  function formatNumber(n) {
+    return n == null ? "–" : Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "");
+  }
+
+  function createChart() {
+    chart = new Chart($("chart"), {
+      type: "scatter",
+      data: { datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 250 },
+        interaction: { mode: "nearest", intersect: true },
+        scales: {
+          x: {
+            type: "linear",
+            title: { display: true, text: "Age (weeks)" },
+            grid: { color: "#eef0f3" },
+          },
+          y: {
+            title: { display: true, text: METRICS[state.metric].label },
+            grid: { color: "#eef0f3" },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => items[0]?.dataset.label ?? "",
+              label: (item) => {
+                const unit = METRICS[state.metric].unit;
+                if (item.dataset.kind === "median") {
+                  const p = item.raw;
+                  return `≈${p.x} wk: ${formatNumber(p.y)} ${unit} (median of ${p.n} measurements, ${p.dogCount} dogs)`;
+                }
+                const r = item.raw.record;
+                const age = `${r.ageLabel || "?"} (${formatNumber(r.weeks)} wk${r.ageEstimated ? ", estimated" : ""})`;
+                const lines = [`${formatNumber(item.raw.y)} ${unit} at ${age}`];
+                const other = state.metric === "weight" ? r.height : r.weight;
+                if (other != null) {
+                  lines.push(state.metric === "weight" ? `Height: ${formatNumber(other)} in` : `Weight: ${formatNumber(other)} lbs`);
+                }
+                if (r.notes && !r.ageEstimated) lines.push(`Note: ${r.notes}`);
+                return lines;
+              },
+            },
+          },
+        },
+        onClick: (_event, elements) => {
+          const hit = elements.find((el) => chart.data.datasets[el.datasetIndex].kind === "dog");
+          selectDog(hit ? chart.data.datasets[hit.datasetIndex].label : null);
+        },
+        onHover: (event, elements) => {
+          event.native.target.style.cursor = elements.length ? "pointer" : "default";
+        },
+      },
+    });
+  }
+
+  function render() {
+    if (!chart) createChart();
+    chart.options.scales.y.title.text = METRICS[state.metric].label;
+    chart.options.scales.y.beginAtZero = state.metric === "weight";
+    chart.data.datasets = buildDatasets();
+    chart.update();
+
+    for (const group of document.querySelectorAll(".segmented")) {
+      for (const button of group.querySelectorAll("button")) {
+        button.setAttribute("aria-pressed", String(state[group.dataset.state] === button.dataset.value));
+      }
+    }
+    $("max-weeks").value = Number.isFinite(state.maxWeeks) ? String(state.maxWeeks) : "all";
+    $("show-lines").checked = state.lines;
+    $("show-median").checked = state.median;
+    $("dog-search").value = state.selected ?? "";
+
+    const hidden = hiddenCount();
+    $("hidden-note").textContent = hidden
+      ? `${hidden} older measurement${hidden === 1 ? "" : "s"} outside the age range`
+      : "";
+
+    const empty = chart.data.datasets.every((d) => d.kind !== "dog");
+    $("overlay").hidden = !empty;
+    if (empty) $("overlay").textContent = "No measurements match these filters.";
+
+    renderDogPanel();
+    writeUrl();
+  }
+
+  function renderDogPanel() {
+    const panel = $("dog-panel");
+    const dog = state.selected ? dogs.get(state.selected) : null;
+    if (!dog) {
+      panel.hidden = true;
+      panel.innerHTML = "";
+      return;
+    }
+    const statuses = [...new Set(dog.records.map((r) => r.status).filter(Boolean))].join(", ");
+    panel.hidden = false;
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:start">
+        <div>
+          <h2></h2>
+          <div class="sub"><span class="pill ${dog.sex}">${dog.sex}</span>
+            ${statuses ? ` · ${statuses}` : ""} · ${dog.records.length} measurement${dog.records.length === 1 ? "" : "s"}</div>
+        </div>
+        <button class="plain" id="clear-dog">Clear highlight</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Age</th><th class="num">Weeks</th><th class="num">Weight (lbs)</th><th class="num">Height (in)</th><th>Notes</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>`;
+    panel.querySelector("h2").textContent = dog.name;
+    const tbody = panel.querySelector("tbody");
+    for (const r of dog.records) {
+      const tr = document.createElement("tr");
+      for (const [value, cls] of [
+        [r.ageLabel, ""],
+        [formatNumber(r.weeks), "num"],
+        [formatNumber(r.weight), "num"],
+        [formatNumber(r.height), "num"],
+        [r.notes, ""],
+      ]) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    $("clear-dog").addEventListener("click", () => selectDog(null));
+  }
+
+  function selectDog(name) {
+    state.selected = name && dogs.has(name) ? name : null;
+    if (state.selected && state.sex !== "all" && dogs.get(state.selected).sex !== state.sex) state.sex = "all";
+    render();
+  }
+
+  function renderStats() {
+    const all = [...dogs.values()];
+    $("stat-dogs").textContent = all.length;
+    $("stat-measurements").textContent = all.reduce((sum, d) => sum + d.records.length, 0);
+    $("stat-female").textContent = all.filter((d) => d.sex === "Female").length;
+    $("stat-male").textContent = all.filter((d) => d.sex === "Male").length;
+    $("dog-list").innerHTML = "";
+    for (const dog of all) {
+      const option = document.createElement("option");
+      option.value = dog.name;
+      $("dog-list").appendChild(option);
+    }
+  }
+
+  function readUrl() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("metric") in METRICS) state.metric = params.get("metric");
+    if (["all", "Female", "Male"].includes(params.get("sex"))) state.sex = params.get("sex");
+    const max = params.get("max");
+    if (max === "all") state.maxWeeks = Infinity;
+    else if (toNumber(max)) state.maxWeeks = toNumber(max);
+    if (params.has("lines")) state.lines = params.get("lines") !== "0";
+    if (params.has("median")) state.median = params.get("median") !== "0";
+    if (params.get("dog")) state.selected = params.get("dog");
+  }
+
+  function writeUrl() {
+    const params = new URLSearchParams({
+      metric: state.metric,
+      sex: state.sex,
+      max: Number.isFinite(state.maxWeeks) ? state.maxWeeks : "all",
+    });
+    if (!state.lines) params.set("lines", "0");
+    if (!state.median) params.set("median", "0");
+    if (state.selected) params.set("dog", state.selected);
+    history.replaceState(null, "", `${location.pathname}?${params}`);
+  }
+
+  async function loadData() {
+    $("overlay").hidden = false;
+    $("overlay").textContent = "Loading data…";
+    try {
+      const response = await fetch(DATA_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      if (text.trimStart().startsWith("<")) throw new Error("the sheet returned a web page instead of data (is it still shared publicly?)");
+      dogs = groupByDog(parseRows(text));
+      if (state.selected && !dogs.has(state.selected)) state.selected = null;
+      renderStats();
+      $("loaded-at").textContent = `updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      render();
+    } catch (error) {
+      $("overlay").hidden = false;
+      $("overlay").textContent = `Couldn't load the spreadsheet: ${error.message}`;
+      $("loaded-at").textContent = "load failed";
+    }
+  }
+
+  function wireControls() {
+    $("sheet-link").href = SHEET_URL;
+    for (const group of document.querySelectorAll(".segmented")) {
+      group.addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        state[group.dataset.state] = button.dataset.value;
+        if (group.dataset.state === "sex" && state.selected && state.sex !== "all" && dogs.get(state.selected)?.sex !== state.sex) {
+          state.selected = null;
+        }
+        render();
+      });
+    }
+    $("max-weeks").addEventListener("change", (e) => {
+      state.maxWeeks = e.target.value === "all" ? Infinity : Number(e.target.value);
+      render();
+    });
+    $("show-lines").addEventListener("change", (e) => { state.lines = e.target.checked; render(); });
+    $("show-median").addEventListener("change", (e) => { state.median = e.target.checked; render(); });
+    $("dog-search").addEventListener("input", (e) => {
+      if (dogs.has(e.target.value)) selectDog(e.target.value);
+    });
+    $("dog-search").addEventListener("change", (e) => {
+      if (!e.target.value) selectDog(null);
+    });
+    $("refresh").addEventListener("click", loadData);
+  }
+
+  readUrl();
+  wireControls();
+  loadData();
+</script>
+</body>
+</html>
